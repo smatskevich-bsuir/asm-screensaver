@@ -28,6 +28,13 @@ prog:
     banner_height equ 12
     banner_size equ 80 * banner_height
 
+    string_buf db 256 dup(0)
+    base dw 10
+
+    bad_args_msg db 'Wrong arguments', 10, 13, 'Use: saver.com wait_time$'
+    bad_num_msg  db 'Wait time should be in [1, 32767]$'
+    endl         db 10, 13, '$'
+
     save_screen proc
         pusha
         push es
@@ -119,17 +126,17 @@ prog:
         inc ax
         mov ticks_counter, ax
         cmp ax, ticks_target
-        jb end_timer_interupt
+        jb end_timer_interrupt
 
         cmp showing, 0
-        jne end_timer_interupt
+        jne end_timer_interrupt
 
         mov showing, 1
         mov ticks_counter, 0
         call save_screen
         call banner
 
-        end_timer_interupt:
+        end_timer_interrupt:
         popa
         pop ds
         iret
@@ -143,7 +150,7 @@ prog:
         pop ds
         pushf
     
-        call dword ptr cs:[old_keyboard_handler]
+        call dword ptr cs:old_keyboard_handler
 
         cli
             mov ah, 11h
@@ -154,17 +161,17 @@ prog:
             jne no_input
 
             ;restore handlers
-           mov ds, WORD PTR cs:old_timer_handler + 2
-           mov dx, WORD PTR cs:old_timer_handler
-           mov al, 1Ch
-           mov ah, 25h
-           int 21h 
+            mov ds, WORD PTR cs:old_timer_handler + 2
+            mov dx, WORD PTR cs:old_timer_handler
+            mov al, 1Ch
+            mov ah, 25h
+            int 21h 
 
-           mov ds, WORD PTR cs:old_keyboard_handler + 2
-           mov dx, WORD PTR cs:old_keyboard_handler
-           mov al, 09h
-           mov ah, 25h
-           int 21h 
+            mov ds, WORD PTR cs:old_keyboard_handler + 2
+            mov dx, WORD PTR cs:old_keyboard_handler
+            mov al, 09h
+            mov ah, 25h
+            int 21h 
         sti
 
         push cs
@@ -173,13 +180,13 @@ prog:
         no_input:
         cmp showing, 0
         jne hide_banner
-        jmp end_keyboard_interupt
+        jmp end_keyboard_interrupt
 
         hide_banner:
         call restore_screen
         mov showing, 0
 
-        end_keyboard_interupt:
+        end_keyboard_interrupt:
         mov ticks_counter, 0
         pop ds
         pop es
@@ -188,7 +195,44 @@ prog:
     keyboard_handler endp
 
     init:
-        mov bx, 10
+        mov bl, cs:[80h] ;args line length 
+        add bx, 80h      ;args line last    
+        mov si, 82h      ;args line start
+        mov di, offset cs:string_buf
+
+        cmp si, bx
+        ja bad_arguments
+        
+        parse_num:
+            cmp BYTE PTR es:[si], ' ' 
+            je parsed_num 
+                
+            mov al, es:[si]
+            mov [di], al      
+                
+            inc di
+            inc si
+        cmp si, bx
+        jbe parse_num
+
+        parsed_num:
+        push 0
+        mov di, offset cs:string_buf 
+        push di
+        mov di, offset cs:ticks_target 
+        push di
+        call atoi
+        pop ax    
+        pop ax 
+        pop ax;error
+
+        cmp ax, 1
+        je bad_number
+
+        cmp ticks_target, 1
+        jl bad_number
+
+        mov bx, ticks_target
         call calc_ticks
         mov ticks_target, ax
 
@@ -222,6 +266,24 @@ prog:
         mov dx, offset init
         int 27h 
 
+        exit:
+        mov ax, 4C00h
+        int 21h
+
+        bad_arguments:
+        mov ax, offset bad_args_msg 
+        push ax
+        call print_str  
+        pop ax
+        jmp exit
+
+        bad_number:
+        mov ax, offset bad_num_msg 
+        push ax
+        call print_str  
+        pop ax
+        jmp exit
+
     calc_ticks:
         ;bx - secs
         ;ax - res
@@ -231,4 +293,82 @@ prog:
         mov bx, 10
         div bx
     ret
+
+    ;first - result code, second - string start, third - 16-bit number address
+    atoi:   
+        push bp
+        mov bp, sp   
+        pusha        
+        
+        ;[ss:bp+4+0] - number address  
+        ;[ss:bp+4+2] - string address 
+        ;[ss:bp+4+4] - error if 1
+        mov di, [ss:bp+4+2]  
+        
+        xor bx, bx     
+        xor ax, ax   
+        xor cx, cx
+        xor dx, dx
+        
+        cmp BYTE PTR [di + bx], '-'
+            jne atoi_loop
+        
+        inc cx; set negative after loop  
+        inc bx
+            
+        ;parse until error
+        atoi_loop:    
+            
+            cmp BYTE PTR [di + bx], '0'    
+            jb atoi_error 
+            cmp BYTE PTR [di + bx], '9'    
+            ja atoi_error
+                                
+            mul base 
+            mov dh, 0
+            mov dl, [di + bx] 
+            sub dl, '0'  
+            add ax, dx  
+            jo atoi_error      
+        
+        inc bx 
+        cmp BYTE PTR [di + bx], 0
+        jne atoi_loop  
+        
+        jmp atoi_result 
+        
+        atoi_error:
+            mov BYTE PTR [ss:bp+4+4], 1    
+            jmp atoi_end 
+        
+        atoi_result:
+            mov BYTE PTR [ss:bp+4+4], 0  
+            cmp cx, 1
+            jne atoi_end
+            neg ax
+        
+        atoi_end: 
+            mov di, [ss:bp+4+0]
+            mov [di], ax 
+        
+        popa
+        pop bp
+    ret 
+
+    print_str:     
+        push bp
+        mov bp, sp   
+        pusha 
+        
+        mov dx, [ss:bp+4+0]     
+        mov ax, 0900h
+        int 21h 
+        
+        mov dx, offset endl
+        mov ax, 0900h
+        int 21h  
+        
+        popa
+        pop bp      
+    ret  
 end prog

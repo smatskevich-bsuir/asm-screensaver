@@ -13,7 +13,8 @@ prog:
     ticks_target dw 0
     ticks_counter dw 0
 
-    banner_text db    '    .d8888b.  888                            d8b                                ' 
+    banner_text db    '                                                                                '
+                db    '    .d8888b.  888                            d8b                                ' 
                 db    '   d88P  Y88b 888                            Y8P                                ' 
                 db    '   Y88b.      888                                                               ' 
                 db    '    "Y888b.   888  .d88b.   .d88b.  88888b.  888 88888b.   .d88b.               ' 
@@ -24,7 +25,7 @@ prog:
                 db    '                                    888                        888              ' 
                 db    '                                    888                   Y8b d88P              ' 
                 db    '                                    888                    "Y88P"               ' 
-    banner_height equ 11
+    banner_height equ 12
     banner_size equ 80 * banner_height
 
     save_screen proc
@@ -114,40 +115,64 @@ prog:
 
         pusha
 
-        cmp showing, 0
-        jne end_interupt
-
         mov ax, ticks_counter
         inc ax
         mov ticks_counter, ax
         cmp ax, ticks_target
-        jb end_interupt
+        jb end_timer_interupt
+
+        cmp showing, 0
+        jne end_timer_interupt
 
         mov showing, 1
         mov ticks_counter, 0
         call save_screen
         call banner
 
-        ;mov ds, WORD PTR cs:old_timer_handler + 2
-        ;mov dx, WORD PTR cs:old_timer_handler
-        ;mov al, 1Ch
-        ;mov ah, 25h
-        ;int 21h 
-
-        end_interupt:
+        end_timer_interupt:
         popa
         pop ds
         iret
     timer_handler endp
 
     keyboard_handler proc far
+        pusha
+        push es
         push ds
         push cs
         pop ds
+        pushf
+    
+        call dword ptr cs:[old_keyboard_handler]
 
+        cli
+            mov ah, 11h
+            int 16h
+            jz no_input
+
+            cmp al, 1Bh
+            jne no_input
+
+            ;restore handlers
+           mov ds, WORD PTR cs:old_timer_handler + 2
+           mov dx, WORD PTR cs:old_timer_handler
+           mov al, 1Ch
+           mov ah, 25h
+           int 21h 
+
+           mov ds, WORD PTR cs:old_keyboard_handler + 2
+           mov dx, WORD PTR cs:old_keyboard_handler
+           mov al, 09h
+           mov ah, 25h
+           int 21h 
+        sti
+
+        push cs
+        pop ds
+
+        no_input:
         cmp showing, 0
         jne hide_banner
-        
         jmp end_keyboard_interupt
 
         hide_banner:
@@ -155,9 +180,10 @@ prog:
         mov showing, 0
 
         end_keyboard_interupt:
-        pushf
-        call dword ptr cs:old_keyboard_handler
+        mov ticks_counter, 0
         pop ds
+        pop es
+        popa
         iret
     keyboard_handler endp
 
@@ -195,10 +221,6 @@ prog:
         ;resident:
         mov dx, offset init
         int 27h 
-
-        ;exit:
-        ;mov ax, 4c00h
-        ;int 21h 
 
     calc_ticks:
         ;bx - secs

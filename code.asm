@@ -172,12 +172,13 @@ prog:
             mov al, 09h
             mov ah, 25h
             int 21h 
+
+            push cs
+            pop ds
+
+            no_input:
         sti
-
-        push cs
-        pop ds
-
-        no_input:
+        
         cmp showing, 0
         jne hide_banner
         jmp end_keyboard_interrupt
